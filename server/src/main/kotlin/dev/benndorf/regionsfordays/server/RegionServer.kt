@@ -4,7 +4,6 @@ import dev.benndorf.regionsfordays.common.ActionEvent
 import dev.benndorf.regionsfordays.common.Chunk
 import dev.benndorf.regionsfordays.common.Event
 import dev.benndorf.regionsfordays.common.EventHandler
-import dev.benndorf.regionsfordays.common.GameObjectEvent
 import dev.benndorf.regionsfordays.common.JoinAction
 import dev.benndorf.regionsfordays.common.MoveAction
 import dev.benndorf.regionsfordays.common.ObjectInvisibleEvent
@@ -14,7 +13,6 @@ import dev.benndorf.regionsfordays.common.PositionEvent
 import dev.benndorf.regionsfordays.common.Region
 import dev.benndorf.regionsfordays.common.Vec2i
 import java.util.UUID
-import kotlin.math.sqrt
 
 class RegionServer(val region: Region) {
 
@@ -41,9 +39,28 @@ class RegionServer(val region: Region) {
           }
           is MoveAction -> {
             val player = findPlayer(event.action.player.uuid) ?: throw RuntimeException("Not connected?!")
+            val oldPos = player.pos
+            val oldChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
             player.pos = (event.action as MoveAction).newPos
-//            println("${region.name}: ${player.name} moved to ${player.pos}")
-            updateObserverList(player)
+            val newChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
+            // if we crossed a chunk boundary
+            if(oldChunk != newChunk) {
+              // start watching the new chunks and unwatching old ones
+              updateObserverList(player)
+              // we might need to notify that some new entity should be displayed
+              watchers[oldChunk]?.forEach {
+                if(it is RegionPlayer && it.observingEntities.contains(player.uuid)) {
+                  it.observe(ObjectInvisibleEvent(player, player.areaOfInterest, oldPos))
+                  it.observingEntities.remove(player.uuid)
+                }
+              }
+              watchers[newChunk]?.forEach {
+                if(it is RegionPlayer && !it.observingEntities.contains(player.uuid)) {
+                  it.observe(ObjectVisibleEvent(player, player.areaOfInterest, oldPos))
+                  it.observingEntities.add(player.uuid)
+                }
+              }
+            }
             emitEvent(player.pos, PositionEvent(player, player.pos))
           }
         }
@@ -93,25 +110,7 @@ class RegionServer(val region: Region) {
   }
 
   fun emitEvent(pos: Vec2i, event: Event) {
-    findObservers(pos)?.forEach { observer ->
-      // TODO nuke all this shit
-      // instead, when you enter a chunk, notify observers, when you leave a chunk, notify observers
-      if(event is GameObjectEvent && observer is RegionPlayer) {
-        // have we not noticed this one before?
-        if(!observer.observingEntities.contains(event.gameObject.uuid)) {
-          observer.observingEntities.add(event.gameObject.uuid)
-          observer.observe(ObjectVisibleEvent(event.gameObject, observer.areaOfInterest, event.gameObject.pos))
-        } else
-        // do we need to forget this one?
-          if(pos.distanceSquared(observer.pos) > (observer.areaOfInterest / 2) * (observer.areaOfInterest / 2)) {
-            observer.observingEntities.remove(event.gameObject.uuid)
-            observer.observe(ObjectInvisibleEvent(event.gameObject, observer.areaOfInterest, event.gameObject.pos))
-            return
-          }
-        println("distance from $observer to ${event.gameObject} ${sqrt(pos.distanceSquared(observer.pos).toDouble())}")
-      }
-      observer.observe(event)
-    }
+    findObservers(pos)?.forEach { it.observe(event) }
   }
 
   fun findChunksInRange(pos: Vec2i, range: Int): Set<Chunk> {
