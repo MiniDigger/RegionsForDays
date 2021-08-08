@@ -1,7 +1,5 @@
 package dev.benndorf.regionsfordays.common
 
-import java.util.UUID
-
 sealed class Event(val range: Int, val pos: Vec2i) {
   override fun toString(): String {
     return "Event(range=$range, pos=$pos)"
@@ -26,7 +24,7 @@ open class GameObjectEvent(val gameObject: GameObject, range: Int, pos: Vec2i) :
   }
 }
 
-class PositionEvent(gameObject: GameObject, val newPos: Vec2i) : GameObjectEvent(gameObject, 1, Vec2i(0, 0)) {
+class PositionEvent(gameObject: GameObject, val newPos: Vec2i) : GameObjectEvent(gameObject, 100, newPos) {
   override fun toString(): String {
     return "PositionEvent(newPos=$newPos) ${super.toString()}"
   }
@@ -37,6 +35,7 @@ class ObjectVisibleEvent(gameObject: GameObject, range: Int, pos: Vec2i) : GameO
     return "ObjectVisibleEvent ${super.toString()}"
   }
 }
+
 class ObjectInvisibleEvent(gameObject: GameObject, range: Int, pos: Vec2i) : GameObjectEvent(gameObject, range, pos) {
   override fun toString(): String {
     return "ObjectInvisibleEvent ${super.toString()}"

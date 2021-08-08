@@ -1,18 +1,8 @@
 package dev.benndorf.regionsfordays.server
 
-import dev.benndorf.regionsfordays.common.ActionEvent
-import dev.benndorf.regionsfordays.common.Chunk
-import dev.benndorf.regionsfordays.common.Event
-import dev.benndorf.regionsfordays.common.EventHandler
-import dev.benndorf.regionsfordays.common.JoinAction
-import dev.benndorf.regionsfordays.common.MoveAction
-import dev.benndorf.regionsfordays.common.ObjectInvisibleEvent
-import dev.benndorf.regionsfordays.common.ObjectVisibleEvent
+import dev.benndorf.regionsfordays.common.*
 import dev.benndorf.regionsfordays.common.Observer
-import dev.benndorf.regionsfordays.common.PositionEvent
-import dev.benndorf.regionsfordays.common.Region
-import dev.benndorf.regionsfordays.common.Vec2i
-import java.util.UUID
+import java.util.*
 
 class RegionServer(val region: Region) {
 
@@ -20,22 +10,59 @@ class RegionServer(val region: Region) {
 
   val watchers: MutableMap<Chunk, MutableList<Observer>> = mutableMapOf()
 
-  fun start() {
+  val neighbors: MutableMap<Region, EventHandler> = mutableMapOf()
 
+  val borderChunks: MutableSet<MutableTriple<Chunk, Int, EventHandler?>> = mutableSetOf()
+
+  fun discoverNeighbors(neighbors: Map<Region, EventHandler>) {
+    this.neighbors.clear()
+    this.neighbors.putAll(neighbors)
+  }
+
+  fun start() {
+    subscribeNeighborServersToBorderChunks()
+  }
+
+  fun subscribeNeighborServersToBorderChunks() {
+    // find border chunks
+    val distance = (viewDistance / 2) * (viewDistance / 2)
+    for (x in (region.pos1.x + 8) until (region.pos2.x + 8) step 16) {
+      for (y in (region.pos1.y + 8) until (region.pos2.y + 8) step 16) {
+        val pos = Vec2i(x, y)
+        if (pos.distanceSquared(Vec2i(region.pos1.x, y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 1, null))
+        if (pos.distanceSquared(Vec2i(x, region.pos1.y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 2, null))
+        if (pos.distanceSquared(Vec2i(region.pos2.x, y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 3, null))
+        if (pos.distanceSquared(Vec2i(x, region.pos2.y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 4, null))
+      }
+    }
+
+    // map directions to servers
+    neighbors.forEach {
+
+    }
+
+    // for every border chunk, find the server that is closest
+    borderChunks.forEach {
+      // TODO huge hack, I don't care
+      if ((region.name == "Left Region" && it.second == 3) || region.name == "Right Region" && it.second == 1) {
+        it.third = neighbors.values.first()
+        watchers.computeIfAbsent(it.first) { mutableListOf() }.add(neighbors.values.first())
+      }
+    }
   }
 
   fun incoming(event: Event, channel: EventHandler) {
-    when(event) {
+    when (event) {
       is ActionEvent -> {
-        when(event.action) {
+        when (event.action) {
           is JoinAction -> {
             // todo load these values from perisistence
-            val player = RegionPlayer(event.action.player.uuid, event.action.player.name, event.action.player.pos, event.action.player.areaOfInterest)
+            val player = RegionPlayer(event.action.player.uuid, event.action.player.name, event.action.player.pos)
             player.channel = channel
             players.add(player)
             println("${region.name}: ${event.action.player.name} joined")
             updateObserverList(player)
-            emitEvent(player.pos, ObjectVisibleEvent(player, 100, player.pos))
+            emitEvent(player.pos, ObjectVisibleEvent(player, viewDistance, player.pos))
           }
           is MoveAction -> {
             val player = findPlayer(event.action.player.uuid) ?: throw RuntimeException("Not connected?!")
@@ -44,67 +71,97 @@ class RegionServer(val region: Region) {
             player.pos = (event.action as MoveAction).newPos
             val newChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
             // if we crossed a chunk boundary
-            if(oldChunk != newChunk) {
+            if (oldChunk != newChunk) {
+              // TODO check if we moved into a new server
               // start watching the new chunks and unwatching old ones
               updateObserverList(player)
-              // we might need to notify that some new entity should be displayed
-              watchers[oldChunk]?.forEach {
-                if(it is RegionPlayer && it.observingEntities.contains(player.uuid)) {
-                  it.observe(ObjectInvisibleEvent(player, player.areaOfInterest, oldPos))
-                  it.observingEntities.remove(player.uuid)
-                }
-              }
-              watchers[newChunk]?.forEach {
-                if(it is RegionPlayer && !it.observingEntities.contains(player.uuid)) {
-                  it.observe(ObjectVisibleEvent(player, player.areaOfInterest, oldPos))
-                  it.observingEntities.add(player.uuid)
-                }
-              }
+              checkHideShow(oldChunk, newChunk, player, oldPos)
             }
             emitEvent(player.pos, PositionEvent(player, player.pos))
           }
         }
       }
+      else -> {
+        println("${region.name} forward $event")
+        emitEvent(event.pos, event)
+      }
+    }
+  }
+
+  fun checkHideShow(oldChunk: Chunk, newChunk: Chunk, player: RegionPlayer, oldPos: Vec2i) {
+    // we might need to notify that some new entity should be or should no longer displayed
+    // so we check if the there are watchers that watch old chunk, but not new chunk
+    val wannaHide = mutableListOf<RegionPlayer>()
+    watchers[oldChunk]?.forEach {
+      if (it is RegionPlayer && it.observingEntities.contains(player.uuid)) {
+        wannaHide.add(it)
+      }
+    }
+    watchers[newChunk]?.forEach {
+      if (it is RegionPlayer) {
+        if (wannaHide.contains(it)) {
+          wannaHide.remove(it)
+        } else if (!it.observingEntities.contains(player.uuid)) {
+          it.observe(ObjectVisibleEvent(player, viewDistance, player.pos))
+          it.observingEntities.add(player.uuid)
+        }
+      }
+    }
+    wannaHide.forEach {
+      it.observe(ObjectInvisibleEvent(player, viewDistance, oldPos))
+      it.observingEntities.remove(player.uuid)
     }
   }
 
   fun updateObserverList(player: RegionPlayer) {
     // find all chunks in range
-    val chunks = findChunksInRange(player.pos, player.areaOfInterest)
+    val chunks = findChunksInRange(player.pos, viewDistance)
 
     // look whats new and whats old
     val oldChunks = mutableListOf<Chunk>()
     val newChunks = mutableListOf<Chunk>()
     player.observingChunks.forEach {
-      if(!chunks.contains(it)) {
+      if (!chunks.contains(it)) {
         oldChunks.add(it)
       }
     }
     chunks.forEach {
-      if(!player.observingChunks.contains(it)) {
+      if (!player.observingChunks.contains(it)) {
         newChunks.add(it)
       }
     }
 
     newChunks.forEach { chunk ->
-      // add to observer list of new chunks
-      watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
+      // keep track
       player.observingChunks.add(chunk)
-      // check if we need to send events for loaded game object
-      findGameObjectInChunk(chunk).forEach {
-        player.observingEntities.add(it.uuid)
-        player.observe(ObjectVisibleEvent(it, it.areaOfInterest, it.pos))
+      // check if this chunk is in our region
+      if (region.contains(chunk)) {
+        // sub to new chunks
+        watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
+        // check if we need to send events for loaded game object
+        findGameObjectInChunk(chunk).forEach {
+          player.observingEntities.add(it.uuid)
+          player.observe(ObjectVisibleEvent(it, viewDistance, it.pos))
+        }
+      } else {
+        println("wowowowo, new chunk is out of bounds?")
       }
     }
 
     oldChunks.forEach { chunk ->
-      // remove from chunks out of range
-      watchers[chunk]?.remove(player)
+      // keep track
       player.observingChunks.remove(chunk)
-      // check if we need to send events to unload stuff
-      findGameObjectInChunk(chunk).forEach {
-        player.observingEntities.remove(it.uuid)
-        player.observe(ObjectInvisibleEvent(it, it.areaOfInterest, it.pos))
+      // check if this chunk is in our region
+      if (region.contains(chunk)) {
+        // unsub from chunks out of range
+        watchers[chunk]?.remove(player)
+        // check if we need to send events to unload stuff
+        findGameObjectInChunk(chunk).forEach {
+          player.observingEntities.remove(it.uuid)
+          player.observe(ObjectInvisibleEvent(it, viewDistance, it.pos))
+        }
+      } else {
+
       }
     }
   }
@@ -118,8 +175,8 @@ class RegionServer(val region: Region) {
     val baseX = pos.x shr 4
     val baseZ = pos.y shr 4
     val chunks = mutableSetOf<Chunk>()
-    for(x in -chunkRange..chunkRange) {
-      for(z in -chunkRange..chunkRange) {
+    for (x in -chunkRange..chunkRange) {
+      for (z in -chunkRange..chunkRange) {
         chunks.add(Chunk(baseX + x, baseZ + z))
       }
     }

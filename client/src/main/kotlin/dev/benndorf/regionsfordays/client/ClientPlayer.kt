@@ -1,24 +1,16 @@
 package dev.benndorf.regionsfordays.client
 
-import dev.benndorf.regionsfordays.common.ActionEvent
-import dev.benndorf.regionsfordays.common.Event
-import dev.benndorf.regionsfordays.common.EventHandler
-import dev.benndorf.regionsfordays.common.JoinAction
-import dev.benndorf.regionsfordays.common.MoveAction
-import dev.benndorf.regionsfordays.common.ObjectInvisibleEvent
-import dev.benndorf.regionsfordays.common.ObjectVisibleEvent
-import dev.benndorf.regionsfordays.common.Player
-import dev.benndorf.regionsfordays.common.PositionEvent
-import dev.benndorf.regionsfordays.common.Vec2i
-import java.util.UUID
+import dev.benndorf.regionsfordays.common.*
+import java.util.*
 
-class ClientPlayer(uuid: UUID, name: String, pos: Vec2i, areaOfInterest: Int) : Player(uuid, name, pos, areaOfInterest) {
+class ClientPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, pos) {
 
   lateinit var channel: EventHandler
   val players: MutableSet<Player> = mutableSetOf()
+  private var actionCounter: Long = 1
 
   fun move(vec: Vec2i) {
-    channel.sendEvent(uuid, ActionEvent(MoveAction(pos.add(vec), 1, this), areaOfInterest, pos))
+    channel.sendEvent(uuid, ActionEvent(MoveAction(pos.add(vec), actionCounter++, this), viewDistance, pos))
   }
 
   fun incomming(event: Event) {
@@ -27,6 +19,12 @@ class ClientPlayer(uuid: UUID, name: String, pos: Vec2i, areaOfInterest: Int) : 
         if (event.gameObject.uuid == uuid) {
           // we got our own location so we can update
           pos = event.newPos
+        }
+        val player = players.find { uuid == event.gameObject.uuid }
+        if (player == null) {
+          println("$name got position event for unknown player ${event.gameObject.uuid}")
+        } else {
+          player.pos = event.newPos
         }
       }
       is ObjectVisibleEvent -> {
@@ -53,7 +51,7 @@ class ClientPlayer(uuid: UUID, name: String, pos: Vec2i, areaOfInterest: Int) : 
   }
 
   fun join() {
-    channel.sendEvent(uuid, ActionEvent(JoinAction(1, this), areaOfInterest, pos))
+    channel.sendEvent(uuid, ActionEvent(JoinAction(actionCounter++, this), viewDistance, pos))
     players.add(this)
   }
 

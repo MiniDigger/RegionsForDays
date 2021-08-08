@@ -1,14 +1,12 @@
 package dev.benndorf.regionsfordays.server
 
-import dev.benndorf.regionsfordays.common.Chunk
-import dev.benndorf.regionsfordays.common.Event
-import dev.benndorf.regionsfordays.common.EventHandler
-import dev.benndorf.regionsfordays.common.Player
-import dev.benndorf.regionsfordays.common.Vec2i
-import java.util.UUID
+import dev.benndorf.regionsfordays.common.*
+import java.util.*
 
-class RegionPlayer(uuid: UUID, name: String, pos: Vec2i, areaOfInterest: Int) : Player(uuid, name, pos, areaOfInterest) {
+class RegionPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, pos) {
   lateinit var channel: EventHandler
+
+  // all chunks a player has in his area of interest. CAN BE IN ANOTHER REGION!
   var observingChunks: MutableSet<Chunk> = mutableSetOf()
   val observingEntities: MutableSet<UUID> = mutableSetOf()
 

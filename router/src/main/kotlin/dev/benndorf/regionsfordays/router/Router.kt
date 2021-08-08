@@ -1,12 +1,7 @@
 package dev.benndorf.regionsfordays.router
 
-import dev.benndorf.regionsfordays.common.ActionEvent
-import dev.benndorf.regionsfordays.common.Event
-import dev.benndorf.regionsfordays.common.EventHandler
-import dev.benndorf.regionsfordays.common.JoinAction
-import dev.benndorf.regionsfordays.common.Player
-import dev.benndorf.regionsfordays.common.Vec2i
-import java.util.UUID
+import dev.benndorf.regionsfordays.common.*
+import java.util.*
 
 class Router(val name: String) {
 
@@ -30,7 +25,7 @@ class Router(val name: String) {
 
   fun incomming(player: RouterPlayer, event: Event, channel: EventHandler) {
 //    println("$name: got event from ${player.name}: $event")
-    if(event is ActionEvent && event.action is JoinAction) {
+    if (event is ActionEvent && event.action is JoinAction) {
       acceptClient(player, channel)
     }
 
