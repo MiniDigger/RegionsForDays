@@ -67,14 +67,22 @@ class RegionServer(val region: Region) {
           is MoveAction -> {
             val player = findPlayer(event.action.player.uuid) ?: throw RuntimeException("Not connected?!")
             val oldPos = player.pos
-            val oldChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
             player.pos = (event.action as MoveAction).newPos
+            val oldChunk = Chunk(oldPos.x shr 4, oldPos.y shr 4)
             val newChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
             // if we crossed a chunk boundary
             if (oldChunk != newChunk) {
-              // TODO check if we moved into a new server
               // start watching the new chunks and unwatching old ones
               updateObserverList(player)
+
+              // TODO check if we moved into a new server
+              if (!region.contains(newChunk)) {
+                println("we moved out of region?!")
+                player.pos = oldPos
+                return
+              }
+
+              // check if the new chunk contains entities we need to load
               checkHideShow(oldChunk, newChunk, player, oldPos)
             }
             emitEvent(player.pos, PositionEvent(player, player.pos))
@@ -134,34 +142,30 @@ class RegionServer(val region: Region) {
     newChunks.forEach { chunk ->
       // keep track
       player.observingChunks.add(chunk)
-      // check if this chunk is in our region
+      // sub to new chunks
+      watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
+      // check if we handle this chunk
       if (region.contains(chunk)) {
-        // sub to new chunks
-        watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
         // check if we need to send events for loaded game object
         findGameObjectInChunk(chunk).forEach {
           player.observingEntities.add(it.uuid)
           player.observe(ObjectVisibleEvent(it, viewDistance, it.pos))
         }
-      } else {
-        println("wowowowo, new chunk is out of bounds?")
       }
     }
 
     oldChunks.forEach { chunk ->
       // keep track
       player.observingChunks.remove(chunk)
-      // check if this chunk is in our region
+      // unsub from chunks out of range
+      watchers[chunk]?.remove(player)
+      // check if we handle this chunk
       if (region.contains(chunk)) {
-        // unsub from chunks out of range
-        watchers[chunk]?.remove(player)
         // check if we need to send events to unload stuff
         findGameObjectInChunk(chunk).forEach {
           player.observingEntities.remove(it.uuid)
           player.observe(ObjectInvisibleEvent(it, viewDistance, it.pos))
         }
-      } else {
-
       }
     }
   }
@@ -183,9 +187,15 @@ class RegionServer(val region: Region) {
     return chunks
   }
 
+  fun findChunksByObserver(observer: Observer) = watchers.filter { it.value.contains(observer) }
+
   fun findObservers(pos: Vec2i) = watchers[Chunk(pos.x shr 4, pos.y shr 4)]
 
   fun findPlayer(uuid: UUID) = players.find { it.uuid == uuid }
 
   fun findGameObjectInChunk(chunk: Chunk) = players.filter { chunk.contains(it.pos) }
+
+  override fun toString(): String {
+    return "RegionServer(region=${region.name})"
+  }
 }
