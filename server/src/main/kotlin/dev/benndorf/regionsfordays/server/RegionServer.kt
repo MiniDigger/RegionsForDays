@@ -83,7 +83,7 @@ class RegionServer(val region: Region) {
               }
 
               // check if the new chunk contains entities we need to load
-              checkHideShow(oldChunk, newChunk, player, oldPos)
+              checkHideAndShowForWatcher(oldChunk, newChunk, player, oldPos)
             }
             emitEvent(player.pos, PositionEvent(player, player.pos))
           }
@@ -96,7 +96,7 @@ class RegionServer(val region: Region) {
     }
   }
 
-  fun checkHideShow(oldChunk: Chunk, newChunk: Chunk, player: RegionPlayer, oldPos: Vec2i) {
+  fun checkHideAndShowForWatcher(oldChunk: Chunk, newChunk: Chunk, player: RegionPlayer, oldPos: Vec2i) {
     // we might need to notify that some new entity should be or should no longer displayed
     // so we check if the there are watchers that watch old chunk, but not new chunk
     val wannaHide = mutableListOf<RegionPlayer>()
@@ -146,11 +146,8 @@ class RegionServer(val region: Region) {
       watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
       // check if we handle this chunk
       if (region.contains(chunk)) {
-        // check if we need to send events for loaded game object
-        findGameObjectInChunk(chunk).forEach {
-          player.observingEntities.add(it.uuid)
-          player.observe(ObjectVisibleEvent(it, viewDistance, it.pos))
-        }
+        // load
+        player.observe(ChunkLoadEvent(chunk, findChunkData(chunk), viewDistance, chunk.centerPos()))
       }
     }
 
@@ -161,11 +158,10 @@ class RegionServer(val region: Region) {
       watchers[chunk]?.remove(player)
       // check if we handle this chunk
       if (region.contains(chunk)) {
-        // check if we need to send events to unload stuff
-        findGameObjectInChunk(chunk).forEach {
-          player.observingEntities.remove(it.uuid)
-          player.observe(ObjectInvisibleEvent(it, viewDistance, it.pos))
-        }
+        // unload
+        player.observe(ChunkUnloadEvent(chunk, viewDistance, chunk.centerPos()))
+        // untrack entities
+        findGameObjectInChunk(chunk).forEach { player.observingEntities.remove(it.uuid) }
       }
     }
   }
@@ -194,6 +190,8 @@ class RegionServer(val region: Region) {
   fun findPlayer(uuid: UUID) = players.find { it.uuid == uuid }
 
   fun findGameObjectInChunk(chunk: Chunk) = players.filter { chunk.contains(it.pos) }
+
+  fun findChunkData(chunk: Chunk) = ChunkData(findGameObjectInChunk(chunk))
 
   override fun toString(): String {
     return "RegionServer(region=${region.name})"

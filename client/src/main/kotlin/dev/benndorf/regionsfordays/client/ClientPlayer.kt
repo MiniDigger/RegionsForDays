@@ -20,7 +20,7 @@ class ClientPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, po
           // we got our own location so we can update
           pos = event.newPos
         }
-        val player = players.find { uuid == event.gameObject.uuid }
+        val player = players.find { it.uuid == event.gameObject.uuid }
         if (player == null) {
           println("$name got position event for unknown player ${event.gameObject.uuid}")
         } else {
@@ -46,6 +46,18 @@ class ClientPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, po
             }
           }
         }
+      }
+      is ChunkLoadEvent -> {
+        event.chunkData.gameObjects.filterIsInstance<Player>().forEach {
+          if (it.uuid != uuid) {
+            players.add(it)
+            println("$name: woo, we now see $it")
+          }
+        }
+      }
+      is ChunkUnloadEvent -> {
+        players.filter { event.chunk.contains(it.pos) }.forEach { println("$name: woo, we don't see $it anymore") }
+        players.removeIf { event.chunk.contains(it.pos) }
       }
     }
   }

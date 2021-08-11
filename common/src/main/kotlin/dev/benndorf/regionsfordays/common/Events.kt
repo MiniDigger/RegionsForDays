@@ -18,6 +18,18 @@ open class ServerEvent(range: Int, pos: Vec2i) : Event(range, pos) {
   }
 }
 
+class ChunkLoadEvent(val chunk: Chunk, val chunkData: ChunkData, range: Int, pos: Vec2i) : ServerEvent(range, pos) {
+  override fun toString(): String {
+    return "ChunkLoadEvent(chunk=$chunk, chunkData=$chunkData)"
+  }
+}
+
+class ChunkUnloadEvent(val chunk: Chunk, range: Int, pos: Vec2i) : ServerEvent(range, pos) {
+  override fun toString(): String {
+    return "ChunkUnloadEvent(chunk=$chunk)"
+  }
+}
+
 open class GameObjectEvent(val gameObject: GameObject, range: Int, pos: Vec2i) : ServerEvent(range, pos) {
   override fun toString(): String {
     return "GameObjectEvent(gameObject=$gameObject) ${super.toString()}"

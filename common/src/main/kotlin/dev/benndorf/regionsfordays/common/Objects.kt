@@ -51,7 +51,10 @@ data class Region(val name: String, val pos1: Vec2i, val pos2: Vec2i) {
 
 data class Chunk(val x: Int, val z: Int) {
   fun contains(pos: Vec2i) = pos.x shr 4 == x && pos.y shr 4 == z
+  fun centerPos(): Vec2i = Vec2i((x shl 4) + 8, (z shl 4) + 8)
 }
+
+data class ChunkData(val gameObjects: List<GameObject>)
 
 interface Observer {
   fun observe(event: Event)
