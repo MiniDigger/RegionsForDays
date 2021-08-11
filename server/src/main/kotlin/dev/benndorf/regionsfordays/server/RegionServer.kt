@@ -20,7 +20,7 @@ class RegionServer(val region: Region) {
   }
 
   fun start() {
-    subscribeNeighborServersToBorderChunks()
+//    subscribeNeighborServersToBorderChunks()
   }
 
   fun subscribeNeighborServersToBorderChunks() {
@@ -89,9 +89,18 @@ class RegionServer(val region: Region) {
           }
         }
       }
+      is SubRequestEvent -> {
+        // TODO need to actually open a channel here
+        watchers.computeIfAbsent(event.chunk) { mutableListOf() }.add(event.player)
+        event.player.observe(ChunkLoadEvent(event.chunk, findChunkData(event.chunk)))
+      }
+      is UnsubRequestEvent -> {
+        // TODO need to actually close a channel here
+        watchers[event.chunk]?.remove(event.player)
+        event.player.observe(ChunkUnloadEvent(event.chunk))
+      }
       else -> {
-        println("${region.name} forward $event")
-        emitEvent(event.pos, event)
+        println("${region.name} unknown event $event")
       }
     }
   }
@@ -142,26 +151,32 @@ class RegionServer(val region: Region) {
     newChunks.forEach { chunk ->
       // keep track
       player.observingChunks.add(chunk)
-      // sub to new chunks
-      watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
       // check if we handle this chunk
       if (region.contains(chunk)) {
+        // sub to new chunks
+        watchers.computeIfAbsent(chunk) { mutableListOf() }.add(player)
         // load
-        player.observe(ChunkLoadEvent(chunk, findChunkData(chunk), viewDistance, chunk.centerPos()))
+        player.observe(ChunkLoadEvent(chunk, findChunkData(chunk)))
+      } else {
+        // tell the other server to open a channel and sub the player
+        findChunkOwner(chunk).observe(SubRequestEvent(chunk, player))
       }
     }
 
     oldChunks.forEach { chunk ->
       // keep track
       player.observingChunks.remove(chunk)
-      // unsub from chunks out of range
-      watchers[chunk]?.remove(player)
       // check if we handle this chunk
       if (region.contains(chunk)) {
+        // unsub from chunks out of range
+        watchers[chunk]?.remove(player)
         // unload
-        player.observe(ChunkUnloadEvent(chunk, viewDistance, chunk.centerPos()))
+        player.observe(ChunkUnloadEvent(chunk))
         // untrack entities
         findGameObjectInChunk(chunk).forEach { player.observingEntities.remove(it.uuid) }
+      } else {
+        // tell the other server to close the channel and unsub the player
+        findChunkOwner(chunk).observe(UnsubRequestEvent(chunk, player))
       }
     }
   }
@@ -192,6 +207,8 @@ class RegionServer(val region: Region) {
   fun findGameObjectInChunk(chunk: Chunk) = players.filter { chunk.contains(it.pos) }
 
   fun findChunkData(chunk: Chunk) = ChunkData(findGameObjectInChunk(chunk))
+
+  fun findChunkOwner(chunk: Chunk) = neighbors.filterKeys { it.contains(chunk) }.values.first()
 
   override fun toString(): String {
     return "RegionServer(region=${region.name})"
