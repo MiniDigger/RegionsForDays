@@ -1,18 +1,26 @@
 package dev.benndorf.regionsfordays.common
 
-open class Action(val id: Long, val player: Player) {
+import kotlinx.serialization.Serializable
+
+@Serializable
+sealed class Action {
+  abstract val id: Long
+  abstract val player: Player
+
   override fun toString(): String {
     return "Action(id=$id, player=$player)"
   }
 }
 
-class MoveAction(val newPos: Vec2i, id: Long, player: Player) : Action(id, player) {
+@Serializable
+class MoveAction(val newPos: Vec2i, override val id: Long, override val player: Player) : Action() {
   override fun toString(): String {
     return "MoveAction(newPos=$newPos) ${super.toString()}"
   }
 }
 
-class JoinAction(id: Long, player: Player) : Action(id, player) {
+@Serializable
+class JoinAction(override val id: Long, override val player: Player) : Action() {
   override fun toString(): String {
     return "JoinAction() ${super.toString()}"
   }

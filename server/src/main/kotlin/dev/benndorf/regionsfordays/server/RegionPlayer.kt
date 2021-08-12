@@ -1,9 +1,10 @@
 package dev.benndorf.regionsfordays.server
 
 import dev.benndorf.regionsfordays.common.*
+import dev.benndorf.regionsfordays.common.Observer
 import java.util.*
 
-class RegionPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, pos) {
+class RegionPlayer(val player: Player) : Observer {
   lateinit var channel: EventHandler
 
   // all chunks a player has in his area of interest. CAN BE IN ANOTHER REGION!
@@ -11,6 +12,6 @@ class RegionPlayer(uuid: UUID, name: String, pos: Vec2i) : Player(uuid, name, po
   val observingEntities: MutableSet<UUID> = mutableSetOf()
 
   override fun observe(event: Event) {
-    channel.receiveEvent(uuid, event)
+    channel.receiveEvent(player.uuid, event)
   }
 }

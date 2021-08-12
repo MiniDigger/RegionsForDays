@@ -57,19 +57,19 @@ class RegionServer(val region: Region) {
         when (event.action) {
           is JoinAction -> {
             // todo load these values from perisistence
-            val player = RegionPlayer(event.action.player.uuid, event.action.player.name, event.action.player.pos)
+            val player = RegionPlayer(Player(event.action.player.uuid, event.action.player.name, event.action.player.pos))
             player.channel = channel
             players.add(player)
             println("${region.name}: ${event.action.player.name} joined")
             updateObserverList(player)
-            emitEvent(player.pos, ObjectVisibleEvent(player, viewDistance, player.pos))
+            emitEvent(player.player.pos, ObjectVisibleEvent(player.player, viewDistance, player.player.pos))
           }
           is MoveAction -> {
             val player = findPlayer(event.action.player.uuid) ?: throw RuntimeException("Not connected?!")
-            val oldPos = player.pos
-            player.pos = (event.action as MoveAction).newPos
+            val oldPos = player.player.pos
+            player.player.pos = (event.action as MoveAction).newPos
             val oldChunk = Chunk(oldPos.x shr 4, oldPos.y shr 4)
-            val newChunk = Chunk(player.pos.x shr 4, player.pos.y shr 4)
+            val newChunk = Chunk(player.player.pos.x shr 4, player.player.pos.y shr 4)
             // if we crossed a chunk boundary
             if (oldChunk != newChunk) {
               // start watching the new chunks and unwatching old ones
@@ -78,14 +78,14 @@ class RegionServer(val region: Region) {
               // TODO check if we moved into a new server
               if (!region.contains(newChunk)) {
                 println("we moved out of region?!")
-                player.pos = oldPos
+                player.player.pos = oldPos
                 return
               }
 
               // check if the new chunk contains entities we need to load
               checkHideAndShowForWatcher(oldChunk, newChunk, player, oldPos)
             }
-            emitEvent(player.pos, PositionEvent(player, player.pos))
+            emitEvent(player.player.pos, PositionEvent(player.player, player.player.pos))
           }
         }
       }
@@ -110,7 +110,7 @@ class RegionServer(val region: Region) {
     // so we check if the there are watchers that watch old chunk, but not new chunk
     val wannaHide = mutableListOf<RegionPlayer>()
     watchers[oldChunk]?.forEach {
-      if (it is RegionPlayer && it.observingEntities.contains(player.uuid)) {
+      if (it is RegionPlayer && it.observingEntities.contains(player.player.uuid)) {
         wannaHide.add(it)
       }
     }
@@ -118,21 +118,21 @@ class RegionServer(val region: Region) {
       if (it is RegionPlayer) {
         if (wannaHide.contains(it)) {
           wannaHide.remove(it)
-        } else if (!it.observingEntities.contains(player.uuid)) {
-          it.observe(ObjectVisibleEvent(player, viewDistance, player.pos))
-          it.observingEntities.add(player.uuid)
+        } else if (!it.observingEntities.contains(player.player.uuid)) {
+          it.observe(ObjectVisibleEvent(player.player, viewDistance, player.player.pos))
+          it.observingEntities.add(player.player.uuid)
         }
       }
     }
     wannaHide.forEach {
-      it.observe(ObjectInvisibleEvent(player, viewDistance, oldPos))
-      it.observingEntities.remove(player.uuid)
+      it.observe(ObjectInvisibleEvent(player.player, viewDistance, oldPos))
+      it.observingEntities.remove(player.player.uuid)
     }
   }
 
   fun updateObserverList(player: RegionPlayer) {
     // find all chunks in range
-    val chunks = findChunksInRange(player.pos, viewDistance)
+    val chunks = findChunksInRange(player.player.pos, viewDistance)
 
     // look whats new and whats old
     val oldChunks = mutableListOf<Chunk>()
@@ -159,7 +159,7 @@ class RegionServer(val region: Region) {
         player.observe(ChunkLoadEvent(chunk, findChunkData(chunk)))
       } else {
         // tell the other server to open a channel and sub the player
-        findChunkOwner(chunk).observe(SubRequestEvent(chunk, player))
+        findChunkOwner(chunk).observe(SubRequestEvent(chunk, player.player))
       }
     }
 
@@ -176,7 +176,7 @@ class RegionServer(val region: Region) {
         findGameObjectInChunk(chunk).forEach { player.observingEntities.remove(it.uuid) }
       } else {
         // tell the other server to close the channel and unsub the player
-        findChunkOwner(chunk).observe(UnsubRequestEvent(chunk, player))
+        findChunkOwner(chunk).observe(UnsubRequestEvent(chunk, player.player))
       }
     }
   }
@@ -202,9 +202,9 @@ class RegionServer(val region: Region) {
 
   fun findObservers(pos: Vec2i) = watchers[Chunk(pos.x shr 4, pos.y shr 4)]
 
-  fun findPlayer(uuid: UUID) = players.find { it.uuid == uuid }
+  fun findPlayer(uuid: UUID) = players.find { it.player.uuid == uuid }
 
-  fun findGameObjectInChunk(chunk: Chunk) = players.filter { chunk.contains(it.pos) }
+  fun findGameObjectInChunk(chunk: Chunk) = players.map { it.player }.filter { chunk.contains(it.pos) }
 
   fun findChunkData(chunk: Chunk) = ChunkData(findGameObjectInChunk(chunk))
 

@@ -1,10 +1,14 @@
 package dev.benndorf.regionsfordays.common
 
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Serializer
 import java.util.*
 import kotlin.math.abs
 
 data class MutableTriple<A, B, C>(var first: A, var second: B, var third: C)
 
+@Serializable
 data class Vec2i(val x: Int, val y: Int) {
   fun add(vec: Vec2i) = Vec2i(x + vec.x, y + vec.y)
   fun distanceSquared(pos: Vec2i): Int {
@@ -12,14 +16,18 @@ data class Vec2i(val x: Int, val y: Int) {
   }
 }
 
-abstract class GameObject(var pos: Vec2i, val uuid: UUID) {
+@Serializable
+abstract class GameObject {
+  abstract var pos: Vec2i
+  abstract val uuid: UUID
 
   override fun toString(): String {
     return "GameObject(pos=$pos, uuid=$uuid)"
   }
 }
 
-open class Player(uuid: UUID, val name: String, pos: Vec2i) : GameObject(pos, uuid), Observer {
+@Serializable
+class Player(override val uuid: @Serializable(UUIDSerializer::class) UUID, val name: String, override var pos: Vec2i) : GameObject(), Observer {
   override fun observe(event: Event) {
     TODO("Not yet implemented")
   }
@@ -44,16 +52,19 @@ open class Player(uuid: UUID, val name: String, pos: Vec2i) : GameObject(pos, uu
   }
 }
 
+@Serializable
 data class Region(val name: String, val pos1: Vec2i, val pos2: Vec2i) {
   fun contains(pos: Vec2i) = pos.x in pos1.x..pos2.x && pos.y in pos1.y..pos2.y
   fun contains(chunk: Chunk) = (chunk.x shl 4) + 8 in pos1.x..pos2.x && (chunk.z shl 4) + 8 in pos1.y..pos2.y
 }
 
+@Serializable
 data class Chunk(val x: Int, val z: Int) {
   fun contains(pos: Vec2i) = pos.x shr 4 == x && pos.y shr 4 == z
   fun centerPos(): Vec2i = Vec2i((x shl 4) + 8, (z shl 4) + 8)
 }
 
+@Serializable
 data class ChunkData(val gameObjects: List<GameObject>)
 
 interface Observer {
@@ -67,6 +78,3 @@ interface EventHandler : Observer {
     sendEvent(UUID.randomUUID(), event)
   }
 }
-
-
-

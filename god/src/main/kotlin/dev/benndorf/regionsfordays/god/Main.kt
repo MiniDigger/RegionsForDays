@@ -1,6 +1,6 @@
 package dev.benndorf.regionsfordays.god
 
-import dev.benndorf.regionsfordays.client.ClientPlayer
+import dev.benndorf.regionsfordays.client.Client
 import dev.benndorf.regionsfordays.common.Player
 import dev.benndorf.regionsfordays.common.Region
 import dev.benndorf.regionsfordays.common.Vec2i
@@ -8,6 +8,7 @@ import dev.benndorf.regionsfordays.common.viewDistance
 import dev.benndorf.regionsfordays.router.Router
 import dev.benndorf.regionsfordays.router.RouterServer
 import dev.benndorf.regionsfordays.server.RegionServer
+import kotlinx.coroutines.runBlocking
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -16,7 +17,7 @@ import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.UIManager
 
-fun main() {
+fun main() = runBlocking {
   Main().start()
 }
 
@@ -35,12 +36,12 @@ class Main {
   val router2 = Router("Rounter 2")
   val routers = listOf(router1, router2)
 
-  val playerState1 = Player(UUID.fromString("11111111-1111-1111-1111-111111111111"), "Player 1", Vec2i(21 * 16 + 8, 25 * 16 + 8))
-  val playerState2 = Player(UUID.fromString("22222222-2222-2222-2222-222222222222"), "Player 2", Vec2i(29 * 16 - 8, 25 * 16 + 8))
-  val players = listOf(playerState1, playerState2)
+  val player1 = Player(UUID.fromString("11111111-1111-1111-1111-111111111111"), "Player 1", Vec2i(21 * 16 + 8, 25 * 16 + 8))
+  val player2 = Player(UUID.fromString("22222222-2222-2222-2222-222222222222"), "Player 2", Vec2i(29 * 16 - 8, 25 * 16 + 8))
+  val players = listOf(player1, player2)
 
-  val client1 = ClientPlayer(playerState1.uuid, playerState1.name, playerState1.pos)
-  val client2 = ClientPlayer(playerState2.uuid, playerState2.name, playerState2.pos)
+  val client1 = Client(player1)
+  val client2 = Client(player2)
   val clients = listOf(client1, client2)
 
   var mode = Mode.GOD
@@ -48,7 +49,7 @@ class Main {
   var showRegions = true
   var showBorderChunks = false
 
-  fun start() {
+  suspend fun start() {
     server1.discoverNeighbors(mapOf(region2 to ServerToServerChannel(server1, server2)))
     server1.start()
     server2.discoverNeighbors(mapOf(region1 to ServerToServerChannel(server2, server1)))
@@ -61,16 +62,10 @@ class Main {
     router1.discoverPlayerState(players)
     router2.discoverPlayerState(players)
 
-    join(client1, router1)
-    join(client2, router2)
+    client1.join(router1.server)
+    client2.join(router2.server)
 
     createFrame()
-  }
-
-  fun join(clientPlayer: ClientPlayer, router: Router) {
-    val channel = ClientToRouterChannel(clientPlayer, router)
-    clientPlayer.channel = channel
-    clientPlayer.join()
   }
 
   fun createFrame() {
@@ -86,25 +81,27 @@ class Main {
       frame.layout = BorderLayout()
       frame.addKeyListener(object : KeyAdapter() {
         override fun keyPressed(e: KeyEvent) {
-          when (e.keyChar) {
-            // player 1 movement
-            'w' -> client1.move(Vec2i(0, -1))
-            'a' -> client1.move(Vec2i(-1, 0))
-            's' -> client1.move(Vec2i(0, 1))
-            'd' -> client1.move(Vec2i(1, 0))
-            // player 2 movement
-            'i' -> client2.move(Vec2i(0, -1))
-            'j' -> client2.move(Vec2i(-1, 0))
-            'k' -> client2.move(Vec2i(0, 1))
-            'l' -> client2.move(Vec2i(1, 0))
-            // modes
-            '1' -> mode = Mode.GOD
-            '2' -> mode = Mode.PLAYER1
-            '3' -> mode = Mode.PLAYER2
-            // other options
-            '4' -> showRegions = !showRegions
-            '5' -> showGrid = !showGrid
-            '6' -> showBorderChunks = !showBorderChunks
+          runBlocking {
+            when (e.keyChar) {
+              // player 1 movement
+              'w' -> client1.move(Vec2i(0, -1))
+              'a' -> client1.move(Vec2i(-1, 0))
+              's' -> client1.move(Vec2i(0, 1))
+              'd' -> client1.move(Vec2i(1, 0))
+              // player 2 movement
+              'i' -> client2.move(Vec2i(0, -1))
+              'j' -> client2.move(Vec2i(-1, 0))
+              'k' -> client2.move(Vec2i(0, 1))
+              'l' -> client2.move(Vec2i(1, 0))
+              // modes
+              '1' -> mode = Mode.GOD
+              '2' -> mode = Mode.PLAYER1
+              '3' -> mode = Mode.PLAYER2
+              // other options
+              '4' -> showRegions = !showRegions
+              '5' -> showGrid = !showGrid
+              '6' -> showBorderChunks = !showBorderChunks
+            }
           }
           frame.repaint()
         }
@@ -141,8 +138,8 @@ class GodPane(private val main: Main) : JPanel() {
   private fun paintPlayers(g: Graphics2D) {
     when (main.mode) {
       Mode.GOD -> {
-        for (player in main.clients) {
-          paintPlayer(g, player)
+        for (client in main.clients) {
+          paintPlayer(g, client.player)
         }
       }
       Mode.PLAYER1 -> {
