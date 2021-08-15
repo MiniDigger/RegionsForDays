@@ -9,6 +9,7 @@ import dev.benndorf.regionsfordays.router.Router
 import dev.benndorf.regionsfordays.router.RouterServer
 import dev.benndorf.regionsfordays.server.RegionServer
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.ExperimentalSerializationApi
 import java.awt.*
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
@@ -16,11 +17,13 @@ import java.util.*
 import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.UIManager
+import kotlin.concurrent.thread
 
-fun main() = runBlocking {
+fun main() {
   Main().start()
 }
 
+@ExperimentalSerializationApi
 class Main {
   val dimension = Dimension(50 * 16, 50 * 16)
 
@@ -32,8 +35,8 @@ class Main {
   val server2 = RegionServer(region2)
   val servers = listOf(server1, server2)
 
-  val router1 = Router("Rounter 1")
-  val router2 = Router("Rounter 2")
+  val router1 = Router("Router 1")
+  val router2 = Router("Router 2")
   val routers = listOf(router1, router2)
 
   val player1 = Player(UUID.fromString("11111111-1111-1111-1111-111111111111"), "Player 1", Vec2i(21 * 16 + 8, 25 * 16 + 8))
@@ -49,21 +52,23 @@ class Main {
   var showRegions = true
   var showBorderChunks = false
 
-  suspend fun start() {
-    server1.discoverNeighbors(mapOf(region2 to ServerToServerChannel(server1, server2)))
-    server1.start()
-    server2.discoverNeighbors(mapOf(region1 to ServerToServerChannel(server2, server1)))
-    server2.start()
+  fun start() = runBlocking {
+    thread(name = "Server 1") { server1.start("Server 1", 1001) }
+    thread(name = "Server 2") { server2.start("Server2", 1002) }
+    // todo eventually the server does this...
+    server1.discoverNeighbors(mapOf(region2 to Pair("localhost", 1002)))
+    server2.discoverNeighbors(mapOf(region1 to Pair("localhost", 1001)))
 
-    router1.start()
-    router2.start()
-    router1.discoverServers(listOf(RouterServer(region1, RouterToServerChannel(router1, server1)), RouterServer(region2, RouterToServerChannel(router1, server2))))
-    router2.discoverServers(listOf(RouterServer(region1, RouterToServerChannel(router2, server1)), RouterServer(region2, RouterToServerChannel(router2, server2))))
+    thread(name = "Router 1") { router1.start("Router 1", 2001) }
+    thread(name = "Router 2") { router2.start("Router 2", 2002) }
+    // todo eventually the router does this...
+    router1.discoverServers(listOf(RouterServer(region1, Pair("localhost", 1001)), RouterServer(region2, Pair("localhost", 1002))))
+    router2.discoverServers(listOf(RouterServer(region1, Pair("localhost", 1001)), RouterServer(region2, Pair("localhost", 1002))))
     router1.discoverPlayerState(players)
     router2.discoverPlayerState(players)
 
-    client1.join(router1.server)
-    client2.join(router2.server)
+    thread(name = "Client 1") { client1.start("Client 1", "localhost", 2001) }
+    thread(name = "Client 2") { client2.start("Client 2", "localhost", 2002) }
 
     createFrame()
   }
@@ -81,27 +86,25 @@ class Main {
       frame.layout = BorderLayout()
       frame.addKeyListener(object : KeyAdapter() {
         override fun keyPressed(e: KeyEvent) {
-          runBlocking {
-            when (e.keyChar) {
-              // player 1 movement
-              'w' -> client1.move(Vec2i(0, -1))
-              'a' -> client1.move(Vec2i(-1, 0))
-              's' -> client1.move(Vec2i(0, 1))
-              'd' -> client1.move(Vec2i(1, 0))
-              // player 2 movement
-              'i' -> client2.move(Vec2i(0, -1))
-              'j' -> client2.move(Vec2i(-1, 0))
-              'k' -> client2.move(Vec2i(0, 1))
-              'l' -> client2.move(Vec2i(1, 0))
-              // modes
-              '1' -> mode = Mode.GOD
-              '2' -> mode = Mode.PLAYER1
-              '3' -> mode = Mode.PLAYER2
-              // other options
-              '4' -> showRegions = !showRegions
-              '5' -> showGrid = !showGrid
-              '6' -> showBorderChunks = !showBorderChunks
-            }
+          when (e.keyChar) {
+            // player 1 movement
+            'w' -> client1.move(Vec2i(0, -1))
+            'a' -> client1.move(Vec2i(-1, 0))
+            's' -> client1.move(Vec2i(0, 1))
+            'd' -> client1.move(Vec2i(1, 0))
+            // player 2 movement
+            'i' -> client2.move(Vec2i(0, -1))
+            'j' -> client2.move(Vec2i(-1, 0))
+            'k' -> client2.move(Vec2i(0, 1))
+            'l' -> client2.move(Vec2i(1, 0))
+            // modes
+            '1' -> mode = Mode.GOD
+            '2' -> mode = Mode.PLAYER1
+            '3' -> mode = Mode.PLAYER2
+            // other options
+            '4' -> showRegions = !showRegions
+            '5' -> showGrid = !showGrid
+            '6' -> showBorderChunks = !showBorderChunks
           }
           frame.repaint()
         }
@@ -114,6 +117,7 @@ class Main {
   }
 }
 
+@ExperimentalSerializationApi
 class GodPane(private val main: Main) : JPanel() {
   override fun getPreferredSize(): Dimension {
     return main.dimension

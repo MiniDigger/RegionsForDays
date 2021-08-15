@@ -5,13 +5,16 @@ import dev.benndorf.regionsfordays.common.Observer
 import java.util.*
 
 class RegionPlayer(val player: Player) : Observer {
-  lateinit var channel: EventHandler
+  lateinit var connection: Connection<RegionPlayer>
 
   // all chunks a player has in his area of interest. CAN BE IN ANOTHER REGION!
   var observingChunks: MutableSet<Chunk> = mutableSetOf()
   val observingEntities: MutableSet<UUID> = mutableSetOf()
 
+  override val uuid: UUID
+    get() = player.uuid
+
   override fun observe(event: Event) {
-    channel.receiveEvent(player.uuid, event)
+    connection.sendEvent(ServerEvent(event, uuid))
   }
 }

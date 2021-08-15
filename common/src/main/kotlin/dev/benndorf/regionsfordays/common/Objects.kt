@@ -17,7 +17,7 @@ data class Vec2i(val x: Int, val y: Int) {
 }
 
 @Serializable
-abstract class GameObject {
+sealed class GameObject {
   abstract var pos: Vec2i
   abstract val uuid: UUID
 
@@ -68,6 +68,7 @@ data class Chunk(val x: Int, val z: Int) {
 data class ChunkData(val gameObjects: List<GameObject>)
 
 interface Observer {
+  val uuid: UUID
   fun observe(event: Event)
 }
 

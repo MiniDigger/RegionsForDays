@@ -1,6 +1,7 @@
 package dev.benndorf.regionsfordays.common
 
 import kotlinx.serialization.Serializable
+import java.util.*
 
 @Serializable
 sealed class Event {
@@ -20,42 +21,49 @@ class ActionEvent(val action: Action, override val range: Int, override val pos:
 }
 
 @Serializable
-sealed class ServerEvent() : Event() {
+class ServerEvent(val event: Event, val target: @Serializable(UUIDSerializer::class) UUID, override val range: Int = event.range, override val pos: Vec2i = event.pos) : Event() {
   override fun toString(): String {
-    return "ServerEvent() ${super.toString()}"
+    return "ServerEvent(event=$event, target=$target, range=$range, pos=$pos) ${super.toString()}"
   }
 }
 
 @Serializable
-class ChunkLoadEvent(val chunk: Chunk, val chunkData: ChunkData, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : ServerEvent() {
+class ServerToServerAuthEvent(val region: Region, override val range: Int = viewDistance, override val pos: Vec2i = Vec2i(0, 0)) : Event() {
+  override fun toString(): String {
+    return "ServerToServerAuthEvent(region='$region', range=$range, pos=$pos) ${super.toString()}"
+  }
+}
+
+@Serializable
+class ChunkLoadEvent(val chunk: Chunk, val chunkData: ChunkData, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : Event() {
   override fun toString(): String {
     return "ChunkLoadEvent(chunk=$chunk, chunkData=$chunkData)"
   }
 }
 
 @Serializable
-class ChunkUnloadEvent(val chunk: Chunk, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : ServerEvent() {
+class ChunkUnloadEvent(val chunk: Chunk, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : Event() {
   override fun toString(): String {
     return "ChunkUnloadEvent(chunk=$chunk)"
   }
 }
 
 @Serializable
-class SubRequestEvent(val chunk: Chunk, val player: Player, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : ServerEvent() {
+class SubRequestEvent(val chunk: Chunk, val player: Player, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : Event() {
   override fun toString(): String {
     return "SubRequestEvent(chunk=$chunk, player=$player)"
   }
 }
 
 @Serializable
-class UnsubRequestEvent(val chunk: Chunk, val player: Player, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : ServerEvent() {
+class UnsubRequestEvent(val chunk: Chunk, val player: Player, override val range: Int = viewDistance, override val pos: Vec2i = chunk.centerPos()) : Event() {
   override fun toString(): String {
     return "UnsubRequestEvent(chunk=$chunk, player=$player)"
   }
 }
 
 @Serializable
-sealed class GameObjectEvent : ServerEvent() {
+sealed class GameObjectEvent : Event() {
   abstract val gameObject: GameObject
 
   override fun toString(): String {

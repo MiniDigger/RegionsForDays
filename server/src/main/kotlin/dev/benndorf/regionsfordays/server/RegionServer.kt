@@ -2,63 +2,43 @@ package dev.benndorf.regionsfordays.server
 
 import dev.benndorf.regionsfordays.common.*
 import dev.benndorf.regionsfordays.common.Observer
+import kotlinx.serialization.ExperimentalSerializationApi
 import java.util.*
+import kotlin.concurrent.thread
 
-class RegionServer(val region: Region) {
+@ExperimentalSerializationApi
+class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
 
   val players: MutableList<RegionPlayer> = mutableListOf()
 
   val watchers: MutableMap<Chunk, MutableList<Observer>> = mutableMapOf()
 
-  val neighbors: MutableMap<Region, EventHandler> = mutableMapOf()
+  val neighbors: MutableMap<Region, Pair<String, Int>> = mutableMapOf()
+  val neighborConnections: MutableMap<Region, Connection<OtherServer>> = mutableMapOf()
 
   val borderChunks: MutableSet<MutableTriple<Chunk, Int, EventHandler?>> = mutableSetOf()
 
-  fun discoverNeighbors(neighbors: Map<Region, EventHandler>) {
+  fun discoverNeighbors(neighbors: Map<Region, Pair<String, Int>>) {
     this.neighbors.clear()
     this.neighbors.putAll(neighbors)
+    this.neighborConnections.clear()
   }
 
-  fun start() {
-//    subscribeNeighborServersToBorderChunks()
+  fun start(name: String, port: Int) {
+    start(name, port, { event, connection -> incoming(event, connection) })
   }
 
-  fun subscribeNeighborServersToBorderChunks() {
-    // find border chunks
-    val distance = (viewDistance / 2) * (viewDistance / 2)
-    for (x in (region.pos1.x + 8) until (region.pos2.x + 8) step 16) {
-      for (y in (region.pos1.y + 8) until (region.pos2.y + 8) step 16) {
-        val pos = Vec2i(x, y)
-        if (pos.distanceSquared(Vec2i(region.pos1.x, y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 1, null))
-        if (pos.distanceSquared(Vec2i(x, region.pos1.y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 2, null))
-        if (pos.distanceSquared(Vec2i(region.pos2.x, y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 3, null))
-        if (pos.distanceSquared(Vec2i(x, region.pos2.y)) < distance) borderChunks.add(MutableTriple(Chunk(x shr 4, y shr 4), 4, null))
-      }
-    }
-
-    // map directions to servers
-    neighbors.forEach {
-
-    }
-
-    // for every border chunk, find the server that is closest
-    borderChunks.forEach {
-      // TODO huge hack, I don't care
-      if ((region.name == "Left Region" && it.second == 3) || region.name == "Right Region" && it.second == 1) {
-        it.third = neighbors.values.first()
-        watchers.computeIfAbsent(it.first) { mutableListOf() }.add(neighbors.values.first())
-      }
-    }
-  }
-
-  fun incoming(event: Event, channel: EventHandler) {
+  fun incoming(event: Event, connection: Connection<out Any>) {
     when (event) {
       is ActionEvent -> {
         when (event.action) {
           is JoinAction -> {
             // todo load these values from perisistence
             val player = RegionPlayer(Player(event.action.player.uuid, event.action.player.name, event.action.player.pos))
-            player.channel = channel
+            @Suppress("UNCHECKED_CAST")
+            player.connection = connection as Connection<RegionPlayer>
+            connection.player = player.player
+            connection.context = player
             players.add(player)
             println("${region.name}: ${event.action.player.name} joined")
             updateObserverList(player)
@@ -89,15 +69,23 @@ class RegionServer(val region: Region) {
           }
         }
       }
+      is ServerToServerAuthEvent -> {
+        @Suppress("UNCHECKED_CAST")
+        val con = connection as Connection<OtherServer>
+        con.context = OtherServer(event.region, con, UUID.randomUUID())
+        neighborConnections[region] = con
+        println("${region.name} established connection to ${event.region.name}")
+      }
       is SubRequestEvent -> {
-        // TODO need to actually open a channel here
-        watchers.computeIfAbsent(event.chunk) { mutableListOf() }.add(event.player)
-        event.player.observe(ChunkLoadEvent(event.chunk, findChunkData(event.chunk)))
+        watchers.computeIfAbsent(event.chunk) { mutableListOf() }.add(connection.context as OtherServer)
+        connection.sendEvent(ServerEvent(ChunkLoadEvent(event.chunk, findChunkData(event.chunk)), event.player.uuid))
       }
       is UnsubRequestEvent -> {
-        // TODO need to actually close a channel here
-        watchers[event.chunk]?.remove(event.player)
-        event.player.observe(ChunkUnloadEvent(event.chunk))
+        watchers[event.chunk]?.remove(connection.context as OtherServer)
+        connection.sendEvent(ServerEvent(ChunkUnloadEvent(event.chunk), event.player.uuid))
+      }
+      is ServerEvent -> {
+        findPlayer(event.target)?.connection?.sendEvent(event.event)
       }
       else -> {
         println("${region.name} unknown event $event")
@@ -159,7 +147,7 @@ class RegionServer(val region: Region) {
         player.observe(ChunkLoadEvent(chunk, findChunkData(chunk)))
       } else {
         // tell the other server to open a channel and sub the player
-        findChunkOwner(chunk).observe(SubRequestEvent(chunk, player.player))
+        openChannel(chunk, SubRequestEvent(chunk, player.player))
       }
     }
 
@@ -176,7 +164,7 @@ class RegionServer(val region: Region) {
         findGameObjectInChunk(chunk).forEach { player.observingEntities.remove(it.uuid) }
       } else {
         // tell the other server to close the channel and unsub the player
-        findChunkOwner(chunk).observe(UnsubRequestEvent(chunk, player.player))
+        closeChannel(chunk, UnsubRequestEvent(chunk, player.player))
       }
     }
   }
@@ -208,7 +196,28 @@ class RegionServer(val region: Region) {
 
   fun findChunkData(chunk: Chunk) = ChunkData(findGameObjectInChunk(chunk))
 
-  fun findChunkOwner(chunk: Chunk) = neighbors.filterKeys { it.contains(chunk) }.values.first()
+  fun openChannel(chunk: Chunk, event: Event) {
+    val (region, address) = neighbors.filter { it.key.contains(chunk) }.entries.first()
+    val connection = neighborConnections[region]
+    if (connection != null) {
+      connection.sendEvent(event)
+    } else {
+      thread(name = "${this.region.name} -> ${region.name}") {
+        NettyClient<OtherServer>().start("${this.region.name} -> ${region.name}", address.first, address.second, { e, c -> incoming(e, c) }, { con ->
+          con.context = OtherServer(region, con, UUID.randomUUID())
+          neighborConnections[region] = con
+          con.sendEvent(ServerToServerAuthEvent(this.region))
+          con.sendEvent(event)
+        })
+      }
+    }
+  }
+
+  fun closeChannel(chunk: Chunk, event: Event) {
+    val (region, address) = neighbors.filter { it.key.contains(chunk) }.entries.first()
+    neighborConnections[region]?.sendEvent(event)
+    // TODO check if we the last one, if so, close
+  }
 
   override fun toString(): String {
     return "RegionServer(region=${region.name})"

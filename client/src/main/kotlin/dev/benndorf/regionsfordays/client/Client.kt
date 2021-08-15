@@ -1,21 +1,26 @@
 package dev.benndorf.regionsfordays.client
 
 import dev.benndorf.regionsfordays.common.*
-import io.rsocket.kotlin.transport.local.LocalServer
 import kotlinx.serialization.ExperimentalSerializationApi
 
 @ExperimentalSerializationApi
-class Client(val player: Player) {
+class Client(val player: Player) : NettyClient<Unit>() {
 
-  val eventProcessor: EventProcessor = EventProcessor()
+  lateinit var connection: Connection<Unit>
   val players: MutableSet<Player> = mutableSetOf()
   private var actionCounter: Long = 1
 
-  suspend fun move(vec: Vec2i) {
-    eventProcessor.sendEvent(ActionEvent(MoveAction(player.pos.add(vec), actionCounter++, player), viewDistance, player.pos))
+  fun move(vec: Vec2i) {
+    connection.sendEvent(
+      ActionEvent(
+        MoveAction(player.pos.add(vec), actionCounter++, player),
+        viewDistance,
+        player.pos
+      )
+    )
   }
 
-  fun incomming(event: Event) {
+  fun incomming(event: Event, connection: Connection<Unit>) {
     when (event) {
       is PositionEvent -> {
         if (event.gameObject.uuid == player.uuid) {
@@ -64,9 +69,11 @@ class Client(val player: Player) {
     }
   }
 
-  suspend fun join(server: LocalServer) {
-    eventProcessor.connect(server)
-    eventProcessor.sendEvent(ActionEvent(JoinAction(actionCounter++, player), viewDistance, player.pos))
-    players.add(player)
+  fun start(name: String, hostname: String, port: Int) {
+    start(name, hostname, port, { event, connection -> incomming(event, connection) }, { connection ->
+      this.connection = connection
+      connection.sendEvent(ActionEvent(JoinAction(actionCounter++, player), viewDistance, player.pos))
+      players.add(player)
+    })
   }
 }

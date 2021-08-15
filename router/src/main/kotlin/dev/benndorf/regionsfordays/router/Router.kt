@@ -1,33 +1,19 @@
 package dev.benndorf.regionsfordays.router
 
 import dev.benndorf.regionsfordays.common.*
-import io.rsocket.kotlin.RSocketRequestHandler
-import io.rsocket.kotlin.core.RSocketServer
-import io.rsocket.kotlin.transport.local.LocalServer
 import kotlinx.serialization.ExperimentalSerializationApi
 import java.util.*
+import kotlin.concurrent.thread
 
 @ExperimentalSerializationApi
-class Router(val name: String) {
-
-  val eventProcessor: EventProcessor = EventProcessor()
+class Router(val name: String) : NettyServer<RouterPlayer>() {
 
   val servers: MutableList<RouterServer> = mutableListOf()
-  val clients: MutableList<RouterPlayer> = mutableListOf()
+  val clients: MutableList<Connection<RouterPlayer>> = mutableListOf()
   val playerState: MutableList<Player> = mutableListOf()
 
-  val server = LocalServer()
-
-  fun start() {
-    RSocketServer().bind(this.server) {
-      RSocketRequestHandler {
-        fireAndForget {
-          val event = eventProcessor.decodeEvent(it)
-          println("$name got $event")
-//          incomming(event)
-        }
-      }
-    }
+  fun start(name: String, port: Int) {
+    start(name, port, { event, connection -> incoming(event, connection) })
   }
 
   fun discoverServers(servers: List<RouterServer>) {
@@ -40,25 +26,48 @@ class Router(val name: String) {
     this.playerState.addAll(players)
   }
 
-  fun incomming(player: RouterPlayer, event: Event, channel: EventHandler) {
-//    println("$name: got event from ${player.name}: $event")
+  fun incoming(event: Event, connection: Connection<RouterPlayer>) {
     if (event is ActionEvent && event.action is JoinAction) {
-      acceptClient(player, channel)
+      connection.player = event.action.player
+      connection.context = RouterPlayer(connection.player)
+      acceptClient(connection) {
+        connection.context.server.connection?.sendEvent(event)
+      }
+    } else {
+      connection.context.server.connection?.sendEvent(event)
     }
-
-    player.server.channel.sendEvent(player.player.uuid, event)
   }
 
-  fun acceptClient(player: RouterPlayer, channel: EventHandler) {
-    clients.add(player)
-    player.player.pos = loadLastPlayerPos(player) ?: throw RuntimeException("Unknown player loc")
-    player.server = findServer(player.player.pos) ?: throw RuntimeException("No region found")
-    player.channel = channel
-    println("$name: connected ${player.player.name} to ${player.server.region.name}")
+  fun acceptClient(connection: Connection<RouterPlayer>, callback: () -> Unit) {
+    clients.add(connection)
+    connection.player.pos = loadLastPlayerPos(connection.context) ?: throw RuntimeException("Unknown player loc")
+    connection.context.server = findServer(connection.player.pos) ?: throw RuntimeException("No region found")
+    if (connection.context.server.connection == null) {
+      connect(connection.context.server, callback)
+    } else {
+      callback()
+    }
+    println("$name: connected ${connection.player.name} to ${connection.context.server.region.name}")
   }
 
-  fun receiveEventFromServer(event: Event, uuid: UUID) {
-    findClient(uuid)?.channel?.receiveEvent(uuid, event)
+  fun connect(routerServer: RouterServer, callback: () -> Unit) {
+    thread(name = "$name -> ${routerServer.region.name}") {
+      NettyClient<RouterServer>().start("$name -> ${routerServer.region.name}", routerServer.address.first, routerServer.address.second, { event, connection ->
+        println("$name -> ${routerServer.region.name}: event from server $event")
+        if (event is ServerEvent) {
+          receiveEventFromServer(event)
+        } else {
+          println("not a server event?!")
+        }
+      }, {
+        routerServer.connection = it
+        callback()
+      })
+    }
+  }
+
+  fun receiveEventFromServer(event: ServerEvent) {
+    findClient(event.target)?.sendEvent(event.event)
   }
 
   fun findClient(uuid: UUID) = clients.find { it.player.uuid == uuid }
