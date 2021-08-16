@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Properties>
+        <Property name="console-pattern">%cyan{[%d{HH:mm:ss}]} %highlight{[%-5.5level]} %white{[%-22.22thread]} %cyan{%-25.25X{context}} %highlight{[%-20.20c{1.}]:} %msg%n</Property>
+        <Property name="file-pattern">[%d{HH:mm:ss}] [%-5.5level] [%-22.22thread] [%-25.25X{context}] [%-20.20c{1.}]: %msg%n</Property>
+    </Properties>
+    <Appenders>
+        <Console name="Console">
+            <PatternLayout pattern="${sys:console-pattern}" disableAnsi="false"/>
+        </Console>
+        <RollingRandomAccessFile name="File" fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${sys:file-pattern}"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <OnStartupTriggeringPolicy/>
+            </Policies>
+        </RollingRandomAccessFile>
+    </Appenders>
+    <Loggers>
+        <Logger name="io.netty" level="info" />
+        <Logger name="dev.benndorf" level="debug" />
+        <Root level="info">
+            <AppenderRef ref="Console"/>
+<!--            <AppenderRef ref="File"/>-->
+        </Root>
+    </Loggers>
+</Configuration>

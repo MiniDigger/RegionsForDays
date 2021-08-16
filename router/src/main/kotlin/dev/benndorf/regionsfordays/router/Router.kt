@@ -2,9 +2,12 @@ package dev.benndorf.regionsfordays.router
 
 import dev.benndorf.regionsfordays.common.*
 import kotlinx.serialization.ExperimentalSerializationApi
+import mu.KotlinLogging
+import mu.withLoggingContext
 import java.util.*
 import kotlin.concurrent.thread
 
+private val logger = KotlinLogging.logger {}
 @ExperimentalSerializationApi
 class Router(val name: String) : NettyServer<RouterPlayer>() {
 
@@ -13,7 +16,7 @@ class Router(val name: String) : NettyServer<RouterPlayer>() {
   val playerState: MutableList<Player> = mutableListOf()
 
   fun start(name: String, port: Int) {
-    start(name, port, { event, connection -> incoming(event, connection) })
+    start(name, port, { event, connection -> withLoggingContext("context" to name) { incoming(event, connection) } })
   }
 
   fun discoverServers(servers: List<RouterServer>) {
@@ -47,17 +50,19 @@ class Router(val name: String) : NettyServer<RouterPlayer>() {
     } else {
       callback()
     }
-    println("$name: connected ${connection.player.name} to ${connection.context.server.region.name}")
+    logger.info { "connected ${connection.player.name} to ${connection.context.server.region.name}" }
   }
 
   fun connect(routerServer: RouterServer, callback: () -> Unit) {
     thread(name = "$name -> ${routerServer.region.name}") {
       NettyClient<RouterServer>().start("$name -> ${routerServer.region.name}", routerServer.address.first, routerServer.address.second, { event, connection ->
-        println("$name -> ${routerServer.region.name}: event from server $event")
-        if (event is ServerEvent) {
-          receiveEventFromServer(event)
-        } else {
-          println("not a server event?!")
+        withLoggingContext("context" to name) {
+          logger.debug { "event from server $event" }
+          if (event is ServerEvent) {
+            receiveEventFromServer(event)
+          } else {
+            logger.warn { "not a server event?!" }
+          }
         }
       }, {
         routerServer.connection = it

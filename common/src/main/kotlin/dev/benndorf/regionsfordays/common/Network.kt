@@ -17,12 +17,15 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToByteArray
 import kotlinx.serialization.protobuf.ProtoBuf
+import mu.KotlinLogging
+import org.slf4j.MDC
 import java.net.SocketAddress
 
-
+private val logger = KotlinLogging.logger {}
 @ExperimentalSerializationApi
 open class NettyServer<T : Any> {
   fun start(name: String, port: Int, handler: (Event, Connection<T>) -> Unit, connectCallback: ((Connection<T>) -> Unit)? = null) {
+    MDC.put("context", name)
     val bossGroup = NioEventLoopGroup()
     val workerGroup = NioEventLoopGroup()
 
@@ -44,6 +47,7 @@ open class NettyServer<T : Any> {
 @ExperimentalSerializationApi
 open class NettyClient<T : Any> {
   fun start(name: String, hostname: String, port: Int, handler: (Event, Connection<T>) -> Unit, connectCallback: ((Connection<T>) -> Unit)? = null) {
+    MDC.put("context", name)
     val group: EventLoopGroup = NioEventLoopGroup()
 
     try {
@@ -66,33 +70,37 @@ class Connection<T : Any>(private val ctx: ChannelHandlerContext, private val na
 
   fun remoteAddress(): SocketAddress = ctx.channel().remoteAddress()
   fun sendEvent(event: Event) {
-    println("$name: send $event")
+    MDC.put("context", name)
+    logger.debug { "send $event" }
     ctx.channel().writeAndFlush(event)
   }
 }
 
-class ChannelHandler<T : Any>(private val name: String, private val connectCallback: ((Connection<T>) -> Unit)?) : SimpleChannelInboundHandler<Event>() {
+class ChannelHandler<T : Any>(val handler: (Event, Connection<T>) -> Unit, private val connectCallback: ((Connection<T>) -> Unit)?) : SimpleChannelInboundHandler<Event>() {
   var connection: Connection<T>? = null
 
   @Throws(Exception::class)
   override fun channelActive(ctx: ChannelHandlerContext) {
-    connection = Connection(ctx, name)
-    println("$name: [+] Channel connected: ${connection?.remoteAddress()}")
+    MDC.put("context", ctx.name())
+    connection = Connection(ctx, ctx.name())
+    logger.info { "[+] Channel connected: ${connection?.remoteAddress()}" }
     connectCallback?.invoke(connection!!)
   }
 
   @Throws(Exception::class)
   override fun channelInactive(ctx: ChannelHandlerContext) {
-    println("$name: [-] Channel disconnected: ${connection?.remoteAddress()}")
+    MDC.put("context", ctx.name())
+    logger.info { "[-] Channel disconnected: ${connection?.remoteAddress()}" }
     this.connection = null
   }
 
   @Throws(Exception::class)
   override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
+    MDC.put("context", ctx.name())
     if ("Connection reset" == cause.message) {
-      println("$name: ${connection?.remoteAddress()}: Connection reset.")
+      logger.warn { "${connection?.remoteAddress()}: Connection reset." }
     } else {
-      println("$name: ${connection?.remoteAddress()}: Exception caught, closing channel.")
+      logger.warn { "${connection?.remoteAddress()}: Exception caught, closing channel." }
       cause.printStackTrace()
     }
     connection = null
@@ -101,26 +109,27 @@ class ChannelHandler<T : Any>(private val name: String, private val connectCallb
 
   @Throws(Exception::class)
   override fun channelRead0(ctx: ChannelHandlerContext, event: Event) {
-    println("$name: incoming $event")
+    MDC.put("context", ctx.name())
+    logger.debug { "incoming $event" }
+    @Suppress("UNCHECKED_CAST")
+    handler(event, connection as Connection<T>)
   }
 }
 
 @ExperimentalSerializationApi
-class ProtoDecoder<T : Any>(val handler: (Event, Connection<T>) -> Unit) : ByteToMessageDecoder() {
+class ProtoDecoder : ByteToMessageDecoder() {
   override fun decode(ctx: ChannelHandlerContext, input: ByteBuf, out: MutableList<Any>) {
-    val connection = ctx.pipeline().get(ChannelHandler::class.java).connection!!
+    MDC.put("context", ctx.name())
 
     val bytes = ByteArray(input.readableBytes())
     input.readBytes(bytes)
 
     val event = ProtoBuf.decodeFromByteArray<Event>(bytes)
 
-    @Suppress("UNCHECKED_CAST")
-    handler(event, connection as Connection<T>)
     out.add(event)
 
     if (input.readableBytes() > 0) {
-      println("Didn't fully read event ${event.javaClass.simpleName}! ${input.readableBytes()} bytes to go")
+      logger.warn { "Didn't fully read event ${event.javaClass.simpleName}! ${input.readableBytes()} bytes to go" }
       input.skipBytes(input.readableBytes())
     }
   }
@@ -129,10 +138,11 @@ class ProtoDecoder<T : Any>(val handler: (Event, Connection<T>) -> Unit) : ByteT
 @ExperimentalSerializationApi
 class ProtoEncoder : MessageToByteEncoder<Event>() {
   override fun encode(ctx: ChannelHandlerContext, event: Event, out: ByteBuf) {
+    MDC.put("context", ctx.name())
     try {
       out.writeBytes(ProtoBuf.encodeToByteArray(event))
     } catch (ex: Throwable) {
-      println("wat")
+      logger.error { "wat" }
       ex.printStackTrace()
     }
   }
@@ -140,6 +150,7 @@ class ProtoEncoder : MessageToByteEncoder<Event>() {
 
 class PacketLengthDecoder : ByteToMessageDecoder() {
   override fun decode(ctx: ChannelHandlerContext, input: ByteBuf, out: MutableList<Any>) {
+    MDC.put("context", ctx.name())
     input.markReaderIndex()
     val len = input.readInt()
     if (input.readableBytes() < len) {
@@ -152,6 +163,7 @@ class PacketLengthDecoder : ByteToMessageDecoder() {
 
 class PacketLengthEncoder : MessageToByteEncoder<ByteBuf>() {
   override fun encode(ctx: ChannelHandlerContext, msg: ByteBuf, out: ByteBuf) {
+    MDC.put("context", ctx.name())
     out.writeInt(msg.readableBytes())
     out.writeBytes(msg)
   }
@@ -161,14 +173,15 @@ class PacketLengthEncoder : MessageToByteEncoder<ByteBuf>() {
 class Pipeline<T : Any>(private val name: String, private val handler: (Event, Connection<T>) -> Unit, private val connectCallback: ((Connection<T>) -> Unit)?) :
   ChannelInitializer<SocketChannel>() {
   override fun initChannel(ch: SocketChannel) {
+    MDC.put("context", name)
     val pipeline = ch.pipeline()
 
     pipeline.addLast("lengthDecoder", PacketLengthDecoder())
-    pipeline.addLast("decoder", ProtoDecoder(handler))
+    pipeline.addLast("decoder", ProtoDecoder())
 
     pipeline.addLast("lengthEncoder", PacketLengthEncoder())
     pipeline.addLast("encoder", ProtoEncoder())
 
-    pipeline.addLast("handler", ChannelHandler(name, connectCallback))
+    pipeline.addLast(name, ChannelHandler(handler, connectCallback))
   }
 }

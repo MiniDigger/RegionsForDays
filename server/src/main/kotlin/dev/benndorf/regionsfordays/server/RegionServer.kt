@@ -3,9 +3,13 @@ package dev.benndorf.regionsfordays.server
 import dev.benndorf.regionsfordays.common.*
 import dev.benndorf.regionsfordays.common.Observer
 import kotlinx.serialization.ExperimentalSerializationApi
+import mu.KotlinLogging
+import mu.withLoggingContext
+import org.slf4j.MDC
 import java.util.*
 import kotlin.concurrent.thread
 
+private val logger = KotlinLogging.logger {}
 @ExperimentalSerializationApi
 class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
 
@@ -25,7 +29,7 @@ class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
   }
 
   fun start(name: String, port: Int) {
-    start(name, port, { event, connection -> incoming(event, connection) })
+    start(name, port, { event, connection -> withLoggingContext("context" to region.name) { incoming(event, connection) } })
   }
 
   fun incoming(event: Event, connection: Connection<out Any>) {
@@ -40,7 +44,7 @@ class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
             connection.player = player.player
             connection.context = player
             players.add(player)
-            println("${region.name}: ${event.action.player.name} joined")
+            logger.info { "${event.action.player.name} joined" }
             updateObserverList(player)
             emitEvent(player.player.pos, ObjectVisibleEvent(player.player, viewDistance, player.player.pos))
           }
@@ -57,7 +61,7 @@ class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
 
               // TODO check if we moved into a new server
               if (!region.contains(newChunk)) {
-                println("we moved out of region?!")
+                logger.warn { "we moved out of region?!" }
                 player.player.pos = oldPos
                 return
               }
@@ -74,7 +78,7 @@ class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
         val con = connection as Connection<OtherServer>
         con.context = OtherServer(event.region, con, UUID.randomUUID())
         neighborConnections[region] = con
-        println("${region.name} established connection to ${event.region.name}")
+        logger.info { "established connection to ${event.region.name}" }
       }
       is SubRequestEvent -> {
         watchers.computeIfAbsent(event.chunk) { mutableListOf() }.add(connection.context as OtherServer)
@@ -88,7 +92,7 @@ class RegionServer(val region: Region) : NettyServer<RegionPlayer>() {
         findPlayer(event.target)?.connection?.sendEvent(event.event)
       }
       else -> {
-        println("${region.name} unknown event $event")
+        logger.warn { "unknown event $event" }
       }
     }
   }

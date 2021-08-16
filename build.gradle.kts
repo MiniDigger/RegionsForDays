@@ -28,5 +28,8 @@ subprojects {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.5.1")
 
     implementation("io.netty:netty-all:4.1.66.Final")
+
+    implementation("io.github.microutils:kotlin-logging-jvm:2.0.10")
+    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.12.1")
   }
 }
