@@ -1,5 +1,7 @@
 # RegionsForDays
 
+> Status: This project is on hold for now. If you are interested in this, find me in the paper discord.
+
 am not gonna explain what this is yet, deal with it.
 
 also, yes, I know, the implementation is horribly data structure wise, this is a poc, deal with it, PRs appreciated (but
